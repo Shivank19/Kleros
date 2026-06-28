@@ -1,49 +1,57 @@
-export type VerdictStatus = 'Supported' | 'Not Supported' | 'Needs Human Review';
+export type AuditDecision = 'SUPPORTED' | 'NOT_SUPPORTED' | 'NEEDS_HUMAN_REVIEW';
 
-export type RequirementStatus = 'Met' | 'Not Met' | 'Ambiguous';
+export type RequirementStatus = 'MET' | 'NOT_MET' | 'AMBIGUOUS' | 'NOT_DOCUMENTED';
 
-export type MissingSeverity = 'High' | 'Medium' | 'Low';
-
-export type AuditTrailStatus = 'Complete' | 'Running' | 'Pending' | 'Warning';
-
-export interface PolicyRequirement {
-  id: string;
-  label: string;
-  status: RequirementStatus;
+export type ClinicalFact = {
+  label: string; 
+  value: string;
   evidence: string;
 }
 
-export interface MissingDoc {
+export type PolicyRequirementCheck = {
   id: string;
-  severity: MissingSeverity;
-  item: string;
+  requirement: string;
+  status: RequirementStatus;
+  evidence: string;
+  explanation: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+export type MissingDocumentation = {
+  id: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  title: string;
   recommendation: string;
 }
 
-export interface ClinicalFact {
-  label: string;
-  value: string;
-}
-
-export interface AuditTrailNode {
+export type AuditTrailStep = {
   id: string;
-  icon: string;
-  action: string;
   label: string;
-  status: AuditTrailStatus;
+  status: "COMPLETE" | "WARNING" | "ERROR";
   timestamp: string;
-  detail: string;
-}
+  description: string;
+  detail?: string;
+};
 
-export interface AuditResult {
-  verdict: VerdictStatus;
+export type AuditResult = {
+  runId: string;
+  decision: AuditDecision;
   confidence: number;
+  summary: string;
   billingCode: string;
-  policyRef: string;
-  runAt: string;
-  policyRequirements: PolicyRequirement[];
-  missingDocumentation: MissingDoc[];
-  clinicalFacts: ClinicalFact[];
-  auditTrail: AuditTrailNode[];
-  rawAgentOutput: Record<string, unknown>;
-}
+  policyReference: string;
+  requirementChecks: PolicyRequirementCheck[];
+  missingDocumentation: MissingDocumentation[];
+  extractedFacts: ClinicalFact[];
+  auditTrail: AuditTrailStep[];
+  rawOutput: unknown;
+};
+
+export type AuditRequest = {
+  clinicalNote: string;
+  billingCode: string;
+  billingCodeDescription?: string;
+  policyId: string;
+  policyTitle: string;
+  policyRequirements: string[];
+};

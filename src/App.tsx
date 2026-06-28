@@ -54,6 +54,8 @@ import theme from './theme';
 import { MOCK_CLINICAL_NOTE, MOCK_AUDIT_RESULT } from './mockData';
 import type { AuditResult, RequirementStatus, MissingSeverity, AuditTrailNode } from './types';
 
+import { runAudit } from './services/auditService';
+
 const BILLING_CODES = [
   'CPT 99281 – ED Visit, Level 1',
   'CPT 99282 – ED Visit, Level 2',
@@ -72,6 +74,37 @@ const POLICIES = [
   'LCD L34806 – Pulmonary Rehabilitation',
   'CMS IOM Ch.12 §30.6.12',
 ];
+
+const POLICY_REQUIREMENTS: Record<string, string[]> = {
+  'LCD L34559 – Emergency Medicine': [
+    'Chief complaint must be documented.',
+    'History and examination must support the selected emergency department visit level.',
+    'Medical decision making must support the billed level of service.',
+    'Clinical severity, risk, or complexity must be documented.',
+    'Treatment plan or disposition must be documented.',
+  ],
+  'LCD L33822 – Critical Care Services': [
+    'Critical illness or injury must be documented.',
+    'High-complexity decision making must be documented.',
+    'Total critical care time must be documented.',
+    'Provider must document direct management of life-threatening condition.',
+  ],
+  'NCD 20.5 – Respiratory Assist Devices': [
+    'Respiratory diagnosis must be documented.',
+    'Medical necessity for respiratory support must be documented.',
+    'Relevant oxygen saturation or pulmonary function findings must be documented.',
+  ],
+  'LCD L34806 – Pulmonary Rehabilitation': [
+    'Qualifying pulmonary diagnosis must be documented.',
+    'Functional limitation or clinical need must be documented.',
+    'Treatment plan must be documented.',
+  ],
+  'CMS IOM Ch.12 §30.6.12': [
+    'Service level must be supported by documented history, examination, or medical decision making.',
+    'Documentation must support medical necessity.',
+    'Time-based billing must include total time when applicable.',
+  ],
+};
 
 const ICON_MAP: Record<string, React.ReactElement> = {
   Upload: <UploadIcon sx={{ fontSize: 14 }} />,
@@ -516,12 +549,14 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
   );
 }
 
-function AuditTrailPanel({ nodes }: { nodes: AuditTrailNode[] }) {
+function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutput: unknown;
+}) {  
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    void navigator.clipboard.writeText(JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2));
+    // void navigator.clipboard.writeText(JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2));
+    void navigator.clipboard.writeText(JSON.stringify(rawOutput, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -713,7 +748,8 @@ function AuditTrailPanel({ nodes }: { nodes: AuditTrailNode[] }) {
                 '& .json-bool': { color: '#CE93D8' },
               }}
             >
-              {JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2)}
+              {/* {JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2)} */}
+              {JSON.stringify(rawOutput, null, 2)}
             </Box>
           </Box>
         </Collapse>
@@ -805,38 +841,107 @@ export default function App() {
   const [phase, setPhase] = useState<'input' | 'loading' | 'results'>('input');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [visibleTrailNodes, setVisibleTrailNodes] = useState<number>(0);
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const handleRunAudit = () => {
+  // const handleRunAudit = () => {
+  //   setPhase('loading');
+  //   setLoadingProgress(0);
+  //   setVisibleTrailNodes(0);
+
+  //   const start = Date.now();
+  //   const duration = 2800;
+
+  //   const tick = () => {
+  //     const elapsed = Date.now() - start;
+  //     const pct = Math.min((elapsed / duration) * 100, 100);
+  //     setLoadingProgress(pct);
+
+  //     if (pct < 100) {
+  //       requestAnimationFrame(tick);
+  //     } else {
+  //       setPhase('results');
+  //       // Reveal timeline nodes one-by-one
+  //       MOCK_AUDIT_RESULT.auditTrail.forEach((_, idx) => {
+  //         setTimeout(() => {
+  //           setVisibleTrailNodes(idx + 1);
+  //         }, idx * 180);
+  //       });
+  //       setTimeout(() => {
+  //         resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  //       }, 200);
+  //     }
+  //   };
+  //   requestAnimationFrame(tick);
+  // };
+
+  const animateLoading = (duration = 2800) => {
+    return new Promise<void>((resolve) => {
+      const start = Date.now();
+
+      const tick = () => {
+        const elapsed = Date.now() - start; 
+        const pct = Math.min((elapsed / duration) * 100, 100);
+        setLoadingProgress(pct);
+
+        if (pct < 100) {
+          requestAnimationFrame(tick);
+        } else {
+          resolve();
+        }
+      };
+      requestAnimationFrame(tick);
+    });
+  };
+
+  const revealTrialNodes = (result: AuditResult) => {
+    setVisibleTrailNodes(0);
+
+    result.auditTrail.forEach((_, idx) => {
+      setTimeout(() => {
+        setVisibleTrailNodes(idx + 1);
+      }, idx * 180);
+    });
+  }
+
+  const handleRunAudit = async () => {
     setPhase('loading');
     setLoadingProgress(0);
     setVisibleTrailNodes(0);
+    setAuditResult(null);
 
-    const start = Date.now();
-    const duration = 2800;
+    const selectedPolicyDocuments = POLICY_REQUIREMENTS[policy] ?? ['Documentation must support the selected billing code.'];
 
-    const tick = () => {
-      const elapsed = Date.now() - start;
-      const pct = Math.min((elapsed / duration) * 100, 100);
-      setLoadingProgress(pct);
+    try{
+      const auditPromise = runAudit({
+        clinicalNote, billingCode, 
+        policyID: policy.split(' – ')[0]?.trim() || policy,
+        policyTitle: policy,
+        policyRequirements: selectedPolicyDocuments,
+      });
 
-      if (pct < 100) {
-        requestAnimationFrame(tick);
-      } else {
+      const [result] = await Promise.all([auditPromise, animateLoading(2800)]);
+    
+      setAuditResult(result);
+      setPhase('results');
+      revealTrialNodes(result);
+
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 200);
+    } catch (error) {
+        console.error('Error running audit:', error);
+        // Fallback for demo
+        setAuditResult(MOCK_AUDIT_RESULT);
         setPhase('results');
-        // Reveal timeline nodes one-by-one
-        MOCK_AUDIT_RESULT.auditTrail.forEach((_, idx) => {
-          setTimeout(() => {
-            setVisibleTrailNodes(idx + 1);
-          }, idx * 180);
-        });
+      
+        revealTrialNodes(MOCK_AUDIT_RESULT);
+
         setTimeout(() => {
           resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 200);
-      }
-    };
-    requestAnimationFrame(tick);
-  };
+    }
+  }
 
   return (
     <ThemeProvider theme={theme}>
@@ -1300,7 +1405,7 @@ export default function App() {
           {phase === 'loading' && <LoadingState progress={loadingProgress} />}
 
           {/* Phase 2 – Results */}
-          {phase === 'results' && (
+          {phase === 'results' && auditResult && (
             <Box ref={resultsRef} sx={{ mt: 4 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
                 <Box sx={{ height: 1, flex: 1, bgcolor: 'rgba(148, 163, 184, 0.08)' }} />
@@ -1317,16 +1422,19 @@ export default function App() {
                 {/* Left Column — 65% */}
                 <Grid size={{ xs: 12, lg: 8 }}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <VerdictCard result={MOCK_AUDIT_RESULT} />
-                    <PolicyRequirementsPanel result={MOCK_AUDIT_RESULT} />
-                    <MissingDocPanel result={MOCK_AUDIT_RESULT} />
-                    <ClinicalFactsPanel result={MOCK_AUDIT_RESULT} />
+                    <VerdictCard result={auditResult} />
+                    <PolicyRequirementsPanel result={auditResult} />
+                    <MissingDocPanel result={auditResult} />
+                    <ClinicalFactsPanel result={auditResult} />
                   </Box>
                 </Grid>
 
                 {/* Right Column — 35% */}
                 <Grid size={{ xs: 12, lg: 4 }}>
-                  <AuditTrailPanel nodes={MOCK_AUDIT_RESULT.auditTrail.slice(0, visibleTrailNodes)} />
+                  <AuditTrailPanel
+                    nodes={auditResult.auditTrail.slice(0, visibleTrailNodes)}
+                    rawOutput={auditResult.rawAgentOutput}
+                  />                
                 </Grid>
               </Grid>
             </Box>
