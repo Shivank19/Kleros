@@ -27,7 +27,7 @@ export type MissingDocumentation = {
 export type AuditTrailStep = {
   id: string;
   label: string;
-  status: "COMPLETE" | "WARNING" | "ERROR";
+  status: "COMPLETE" | "WARNING" | "RUNNING" | "PENDING";
   timestamp: string;
   description: string;
   detail?: string;
@@ -37,14 +37,14 @@ export type AuditResult = {
   runId: string;
   decision: AuditDecision;
   confidence: number;
-  summary: string;
   billingCode: string;
   policyReference: string;
+  runAt: string;
   requirementChecks: PolicyRequirementCheck[];
   missingDocumentation: MissingDocumentation[];
   extractedFacts: ClinicalFact[];
   auditTrail: AuditTrailStep[];
-  rawOutput: unknown;
+  rawAgentOutput: unknown;
 };
 
 export type AuditRequest = {

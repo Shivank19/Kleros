@@ -12,7 +12,14 @@ app.use(cors());
 app.use(express.json({limit: "2mb"}));
 
 app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", service: "kleros-audit-api"});
+    // res.json({ status: "ok", service: "kleros-audit-api"});
+    res.json({
+    status: "ok",
+    service: "kleros-audit-api",
+    model: process.env.BRAIN_MODEL,
+    baseUrl: process.env.BRAIN_BASE_URL,
+    hasBrainKey: Boolean(process.env.BRAIN_API_KEY),
+  });
 });
 
 app.post("/api/audit", async(req, res) => {

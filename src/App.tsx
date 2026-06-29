@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Box from '@mui/material/Box';
@@ -49,12 +49,14 @@ import CheckIcon from '@mui/icons-material/Check';
 import ScienceIcon from '@mui/icons-material/Science';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
 
-import theme from './theme';
+import { createAppTheme, type ThemeMode } from './theme';
 import { MOCK_CLINICAL_NOTE, MOCK_AUDIT_RESULT } from './mockData';
-import type { AuditResult, RequirementStatus, MissingSeverity, AuditTrailNode } from './types';
+import type { AuditResult, RequirementStatus, MissingDocumentation, AuditTrailStep } from './types';
 
-import { runAudit } from './services/auditService';
+import { runLiveAudit } from './services/auditService';
 
 const BILLING_CODES = [
   'CPT 99281 – ED Visit, Level 1',
@@ -107,37 +109,58 @@ const POLICY_REQUIREMENTS: Record<string, string[]> = {
 };
 
 const ICON_MAP: Record<string, React.ReactElement> = {
-  Upload: <UploadIcon sx={{ fontSize: 14 }} />,
-  Psychology: <PsychologyIcon sx={{ fontSize: 14 }} />,
-  Policy: <PolicyIcon sx={{ fontSize: 14 }} />,
-  Rule: <RuleIcon sx={{ fontSize: 14 }} />,
-  FindInPage: <FindInPageIcon sx={{ fontSize: 14 }} />,
-  Verified: <VerifiedIcon sx={{ fontSize: 14 }} />,
-  Gavel: <GavelIcon sx={{ fontSize: 14 }} />,
+  CLAIM_INGESTED: <UploadIcon sx={{ fontSize: 14 }} />,
+  NLP_EXTRACTION: <PsychologyIcon sx={{ fontSize: 14 }} />,
+  POLICY_LOOKUP: <PolicyIcon sx={{ fontSize: 14 }} />,
+  REQUIREMENT_EVAL: <RuleIcon sx={{ fontSize: 14 }} />,
+  DOCUMENTATION_GAP_ANALYSIS: <FindInPageIcon sx={{ fontSize: 14 }} />,
+  CONFIDENCE_SCORING: <VerifiedIcon sx={{ fontSize: 14 }} />,
+  VERDICT_ISSUED: <GavelIcon sx={{ fontSize: 14 }} />,
 };
 
 function RequirementStatusChip({ status }: { status: RequirementStatus }) {
-  const config: Record<RequirementStatus, { color: string; bg: string; border: string; icon: React.ReactElement }> = {
-    Met: {
-      color: '#00E676',
-      bg: 'rgba(0, 230, 118, 0.08)',
-      border: 'rgba(0, 230, 118, 0.25)',
+  const config: Record<
+    RequirementStatus,
+    {
+      label: string;
+      color: string;
+      bg: string;
+      border: string;
+      icon: React.ReactElement;
+    }
+  > = {
+    MET: {
+      label: 'Met',
+      color: '#16A34A',
+      bg: 'rgba(22, 163, 74, 0.1)',
+      border: 'rgba(22, 163, 74, 0.28)',
       icon: <CheckIcon sx={{ fontSize: 11 }} />,
     },
-    'Not Met': {
-      color: '#FF5252',
-      bg: 'rgba(255, 82, 82, 0.08)',
-      border: 'rgba(255, 82, 82, 0.25)',
+    NOT_MET: {
+      label: 'Not Met',
+      color: '#DC2626',
+      bg: 'rgba(220, 38, 38, 0.1)',
+      border: 'rgba(220, 38, 38, 0.28)',
       icon: <CancelIcon sx={{ fontSize: 11 }} />,
     },
-    Ambiguous: {
-      color: '#FFB300',
-      bg: 'rgba(255, 179, 0, 0.08)',
-      border: 'rgba(255, 179, 0, 0.25)',
+    AMBIGUOUS: {
+      label: 'Ambiguous',
+      color: '#D97706',
+      bg: 'rgba(217, 119, 6, 0.12)',
+      border: 'rgba(217, 119, 6, 0.3)',
+      icon: <HelpIcon sx={{ fontSize: 11 }} />,
+    },
+    NOT_DOCUMENTED: {
+      label: 'Not Documented',
+      color: '#2563EB',
+      bg: 'rgba(37, 99, 235, 0.1)',
+      border: 'rgba(37, 99, 235, 0.28)',
       icon: <HelpIcon sx={{ fontSize: 11 }} />,
     },
   };
+
   const c = config[status];
+
   return (
     <Box
       sx={{
@@ -158,18 +181,19 @@ function RequirementStatusChip({ status }: { status: RequirementStatus }) {
       }}
     >
       {c.icon}
-      {status}
+      {c.label}
     </Box>
   );
 }
-
-function SeverityChip({ severity }: { severity: MissingSeverity }) {
-  const config: Record<MissingSeverity, { color: string; bg: string }> = {
-    High: { color: '#FF5252', bg: 'rgba(255, 82, 82, 0.1)' },
-    Medium: { color: '#FFB300', bg: 'rgba(255, 179, 0, 0.1)' },
-    Low: { color: '#94A3B8', bg: 'rgba(148, 163, 184, 0.08)' },
+function SeverityChip({ severity }: { severity: MissingDocumentation['severity'] }) {
+  const config: Record<MissingDocumentation['severity'], { label: string; color: string; bg: string }> = {
+    HIGH: { label: 'High', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.1)' },
+    MEDIUM: { label: 'Medium', color: '#D97706', bg: 'rgba(217, 119, 6, 0.12)' },
+    LOW: { label: 'Low', color: '#2563EB', bg: 'rgba(37, 99, 235, 0.08)' },
   };
+
   const c = config[severity];
+
   return (
     <Box
       sx={{
@@ -185,19 +209,44 @@ function SeverityChip({ severity }: { severity: MissingSeverity }) {
         display: 'inline-block',
       }}
     >
-      {severity}
+      {c.label}
     </Box>
   );
 }
 
-function AuditTrailStatusChip({ status }: { status: AuditTrailNode['status'] }) {
-  const config = {
-    Complete: { color: '#00E676', bg: 'rgba(0, 230, 118, 0.08)', border: 'rgba(0, 230, 118, 0.2)' },
-    Running: { color: '#4FC3F7', bg: 'rgba(79, 195, 247, 0.08)', border: 'rgba(79, 195, 247, 0.2)' },
-    Pending: { color: '#475569', bg: 'rgba(71, 85, 105, 0.1)', border: 'rgba(71, 85, 105, 0.2)' },
-    Warning: { color: '#FFB300', bg: 'rgba(255, 179, 0, 0.08)', border: 'rgba(255, 179, 0, 0.2)' },
+function AuditTrailStatusChip({ status }: { status: AuditTrailStep['status'] }) {
+  const config: Record<
+    AuditTrailStep['status'],
+    { label: string; color: string; bg: string; border: string }
+  > = {
+    COMPLETE: {
+      label: 'Complete',
+      color: '#16A34A',
+      bg: 'rgba(22, 163, 74, 0.1)',
+      border: 'rgba(22, 163, 74, 0.24)',
+    },
+    RUNNING: {
+      label: 'Running',
+      color: '#2563EB',
+      bg: 'rgba(37, 99, 235, 0.1)',
+      border: 'rgba(37, 99, 235, 0.24)',
+    },
+    PENDING: {
+      label: 'Pending',
+      color: '#725F88',
+      bg: 'rgba(114, 95, 136, 0.1)',
+      border: 'rgba(114, 95, 136, 0.2)',
+    },
+    WARNING: {
+      label: 'Warning',
+      color: '#D97706',
+      bg: 'rgba(217, 119, 6, 0.12)',
+      border: 'rgba(217, 119, 6, 0.26)',
+    },
   };
+
   const c = config[status];
+
   return (
     <Box
       sx={{
@@ -213,33 +262,45 @@ function AuditTrailStatusChip({ status }: { status: AuditTrailNode['status'] }) 
         textTransform: 'uppercase',
       }}
     >
-      {status}
+      {c.label}
     </Box>
   );
 }
-
 function VerdictCard({ result }: { result: AuditResult }) {
-  const verdictConfig = {
-    Supported: {
-      color: '#00E676',
-      bg: 'rgba(0, 230, 118, 0.06)',
-      border: 'rgba(0, 230, 118, 0.2)',
-      progressColor: '#00E676',
+  const verdictConfig: Record<
+    AuditResult['decision'],
+    {
+      label: string;
+      color: string;
+      bg: string;
+      border: string;
+      progressColor: string;
+    }
+  > = {
+    SUPPORTED: {
+      label: 'Supported',
+      color: '#16A34A',
+      bg: 'rgba(22, 163, 74, 0.06)',
+      border: 'rgba(22, 163, 74, 0.22)',
+      progressColor: '#16A34A',
     },
-    'Not Supported': {
-      color: '#FF5252',
-      bg: 'rgba(255, 82, 82, 0.06)',
-      border: 'rgba(255, 82, 82, 0.2)',
-      progressColor: '#FF5252',
+    NOT_SUPPORTED: {
+      label: 'Not Supported',
+      color: '#DC2626',
+      bg: 'rgba(220, 38, 38, 0.06)',
+      border: 'rgba(220, 38, 38, 0.22)',
+      progressColor: '#DC2626',
     },
-    'Needs Human Review': {
-      color: '#FFB300',
-      bg: 'rgba(255, 179, 0, 0.06)',
-      border: 'rgba(255, 179, 0, 0.2)',
-      progressColor: '#FFB300',
+    NEEDS_HUMAN_REVIEW: {
+      label: 'Needs Human Review',
+      color: '#D97706',
+      bg: 'rgba(217, 119, 6, 0.08)',
+      border: 'rgba(217, 119, 6, 0.26)',
+      progressColor: '#D97706',
     },
   };
-  const vc = verdictConfig[result.verdict];
+
+  const vc = verdictConfig[result.decision];
 
   return (
     <Paper
@@ -247,14 +308,26 @@ function VerdictCard({ result }: { result: AuditResult }) {
         p: 3,
         border: `1px solid ${vc.border}`,
         bgcolor: vc.bg,
-        background: `linear-gradient(135deg, ${vc.bg} 0%, rgba(17, 24, 39, 0.95) 100%)`,
+        background: `linear-gradient(135deg, ${vc.bg} 0%, rgba(14, 9, 22, 0.95) 100%)`,
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2.5 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          mb: 2.5,
+        }}
+      >
         <Box>
-          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          <Typography
+            variant="overline"
+            color="text.secondary"
+            sx={{ display: 'block', mb: 0.5 }}
+          >
             Audit Verdict
           </Typography>
+
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box
               sx={{
@@ -266,37 +339,80 @@ function VerdictCard({ result }: { result: AuditResult }) {
                 flexShrink: 0,
               }}
             />
-            <Typography variant="h4" sx={{ color: vc.color, fontFamily: 'monospace', fontWeight: 700 }}>
-              {result.verdict.toUpperCase()}
+
+            <Typography
+              variant="h4"
+              sx={{
+                color: vc.color,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+              }}
+            >
+              {vc.label.toUpperCase()}
             </Typography>
           </Box>
         </Box>
+
         <Box sx={{ textAlign: 'right' }}>
-          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          <Typography
+            variant="overline"
+            color="text.secondary"
+            sx={{ display: 'block', mb: 0.5 }}
+          >
             Run ID
           </Typography>
+
           <Typography
             variant="caption"
-            sx={{ fontFamily: 'monospace', color: 'text.secondary', letterSpacing: '0.05em' }}
+            sx={{
+              fontFamily: 'monospace',
+              color: 'text.secondary',
+              letterSpacing: '0.05em',
+            }}
           >
-            run_8f2a1b3c4d5e6f7a
+            {result.rawAgentOutput &&
+            typeof result.rawAgentOutput === 'object' &&
+            'runId' in result.rawAgentOutput
+              ? String(result.rawAgentOutput.runId)
+              : 'run_live_audit'}
           </Typography>
         </Box>
       </Box>
 
       <Box sx={{ mb: 2.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-            Confidence Score
-          </Typography>
           <Typography
             variant="caption"
-            sx={{ fontFamily: 'monospace', fontWeight: 700, color: vc.color }}
+            color="text.secondary"
+            sx={{
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Confidence Score
+          </Typography>
+
+          <Typography
+            variant="caption"
+            sx={{
+              fontFamily: 'monospace',
+              fontWeight: 700,
+              color: vc.color,
+            }}
           >
             {result.confidence}%
           </Typography>
         </Box>
-        <Box sx={{ position: 'relative', height: 8, borderRadius: 4, bgcolor: 'rgba(148, 163, 184, 0.1)', overflow: 'hidden' }}>
+
+        <Box
+          sx={{
+            position: 'relative',
+            height: 8,
+            borderRadius: 4,
+            bgcolor: 'rgba(120, 113, 128, 0.1)',
+            overflow: 'hidden',
+          }}
+        >
           <Box
             sx={{
               position: 'absolute',
@@ -310,6 +426,7 @@ function VerdictCard({ result }: { result: AuditResult }) {
               transition: 'width 1s ease-out',
             }}
           />
+
           <Box
             sx={{
               position: 'absolute',
@@ -317,30 +434,57 @@ function VerdictCard({ result }: { result: AuditResult }) {
               top: 0,
               height: '100%',
               width: 1,
-              bgcolor: 'rgba(148, 163, 184, 0.3)',
+              bgcolor: 'rgba(168, 85, 247, 0.3)',
             }}
           />
         </Box>
+
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
-          <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.625rem' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              color: 'text.disabled',
+              fontSize: '0.625rem',
+            }}
+          >
             Approval threshold: 80%
           </Typography>
         </Box>
       </Box>
 
-      <Divider sx={{ borderColor: 'rgba(148, 163, 184, 0.08)', mb: 2 }} />
+      <Divider sx={{ borderColor: 'rgba(120, 113, 128, 0.08)', mb: 2 }} />
 
       <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
         {[
           { label: 'Billing Code', value: result.billingCode },
-          { label: 'Policy Reference', value: result.policyRef },
-          { label: 'Audit Time', value: new Date(result.runAt).toLocaleTimeString() },
+          { label: 'Policy Reference', value: result.policyReference },
+          {
+            label: 'Audit Time',
+            value: new Date(result.runAt).toLocaleTimeString(),
+          },
         ].map(({ label, value }) => (
           <Box key={label}>
-            <Typography variant="caption" color="text.disabled" sx={{ display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em', mb: 0.25 }}>
+            <Typography
+              variant="caption"
+              color="text.disabled"
+              sx={{
+                display: 'block',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                mb: 0.25,
+              }}
+            >
               {label}
             </Typography>
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.secondary', fontSize: '0.75rem' }}>
+
+            <Typography
+              variant="body2"
+              sx={{
+                fontFamily: 'monospace',
+                color: 'text.secondary',
+                fontSize: '0.75rem',
+              }}
+            >
               {value}
             </Typography>
           </Box>
@@ -355,14 +499,14 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
 
   return (
     <Paper sx={{ p: 0, overflow: 'hidden' }}>
-      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)' }}>
+      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="overline" color="text.secondary">
             Policy Requirements
           </Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
-            {(['Met', 'Ambiguous', 'Not Met'] as RequirementStatus[]).map((s) => {
-              const count = result.policyRequirements.filter((r) => r.status === s).length;
+            {(['MET', 'AMBIGUOUS', 'NOT_DOCUMENTED', 'NOT_MET'] as RequirementStatus[]).map((s) => {
+              const count = result.requirementChecks.filter((r) => r.status === s).length;
               return (
                 <Box key={s} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <RequirementStatusChip status={s} />
@@ -376,7 +520,7 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
         </Box>
       </Box>
 
-      {result.policyRequirements.map((req, idx) => (
+      {result.requirementChecks.map((req, idx) => (
         <Box key={req.id}>
           <Box
             onClick={() => setExpanded(expanded === req.id ? null : req.id)}
@@ -389,8 +533,8 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
               gap: 2,
               cursor: 'pointer',
               transition: 'background 0.15s',
-              '&:hover': { bgcolor: 'rgba(148, 163, 184, 0.04)' },
-              borderBottom: idx < result.policyRequirements.length - 1 ? '1px solid rgba(148, 163, 184, 0.06)' : 'none',
+              '&:hover': { bgcolor: 'rgba(120, 113, 128, 0.045)' },
+              borderBottom: idx < result.requirementChecks.length - 1 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none',
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1, minWidth: 0 }}>
@@ -401,7 +545,7 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
                 {req.id}
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.primary', fontSize: '0.8125rem', lineHeight: 1.4 }}>
-                {req.label}
+                {req.requirement}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
@@ -418,8 +562,8 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
               sx={{
                 px: 3,
                 py: 1.5,
-                bgcolor: 'rgba(148, 163, 184, 0.03)',
-                borderBottom: '1px solid rgba(148, 163, 184, 0.06)',
+                bgcolor: 'rgba(120, 113, 128, 0.035)',
+                borderBottom: '1px solid rgba(120, 113, 128, 0.06)',
               }}
             >
               <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', mb: 0.5 }}>
@@ -439,7 +583,7 @@ function PolicyRequirementsPanel({ result }: { result: AuditResult }) {
 function MissingDocPanel({ result }: { result: AuditResult }) {
   return (
     <Paper sx={{ p: 0, overflow: 'hidden' }}>
-      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
         <WarningAmberIcon sx={{ fontSize: 16, color: 'warning.main' }} />
         <Typography variant="overline" color="text.secondary">
           Missing Documentation
@@ -447,7 +591,7 @@ function MissingDocPanel({ result }: { result: AuditResult }) {
         <Chip
           label={result.missingDocumentation.length}
           size="small"
-          sx={{ height: 18, fontSize: '0.625rem', bgcolor: 'rgba(255, 179, 0, 0.1)', color: 'warning.main', ml: 'auto' }}
+          sx={{ height: 18, fontSize: '0.625rem', bgcolor: 'rgba(217, 119, 6, 0.1)', color: 'warning.main', ml: 'auto' }}
         />
       </Box>
 
@@ -457,7 +601,7 @@ function MissingDocPanel({ result }: { result: AuditResult }) {
           sx={{
             px: 3,
             py: 2,
-            borderBottom: idx < result.missingDocumentation.length - 1 ? '1px solid rgba(148, 163, 184, 0.06)' : 'none',
+            borderBottom: idx < result.missingDocumentation.length - 1 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none',
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 1 }}>
@@ -469,7 +613,7 @@ function MissingDocPanel({ result }: { result: AuditResult }) {
             </Box>
           </Box>
           <Typography variant="body2" sx={{ color: 'text.primary', mb: 0.75, fontSize: '0.8125rem', fontWeight: 500 }}>
-            {item.item}
+            {item.title}
           </Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem', lineHeight: 1.5, display: 'block' }}>
             {item.recommendation}
@@ -494,7 +638,7 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           cursor: 'pointer',
-          '&:hover': { bgcolor: 'rgba(148, 163, 184, 0.03)' },
+          '&:hover': { bgcolor: 'rgba(120, 113, 128, 0.035)' },
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -503,9 +647,9 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
             Extracted Clinical Facts
           </Typography>
           <Chip
-            label={`${result.clinicalFacts.length} entities`}
+            label={`${result.extractedFacts.length} entities`}
             size="small"
-            sx={{ height: 18, fontSize: '0.625rem', bgcolor: 'rgba(79, 195, 247, 0.1)', color: 'primary.light', ml: 1 }}
+            sx={{ height: 18, fontSize: '0.625rem', bgcolor: 'rgba(120, 113, 128, 0.1)', color: 'primary.light', ml: 1 }}
           />
         </Box>
         {open ? (
@@ -516,7 +660,7 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
       </Box>
 
       <Collapse in={open}>
-        <Box sx={{ borderTop: '1px solid rgba(148, 163, 184, 0.08)' }}>
+        <Box sx={{ borderTop: '1px solid rgba(120, 113, 128, 0.08)' }}>
           <Box
             sx={{
               display: 'grid',
@@ -524,14 +668,14 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
               gap: 0,
             }}
           >
-            {result.clinicalFacts.map((fact, idx) => (
+            {result.extractedFacts.map((fact, idx) => (
               <Box
                 key={fact.label}
                 sx={{
                   px: 3,
                   py: 1.5,
-                  borderBottom: idx < result.clinicalFacts.length - 2 ? '1px solid rgba(148, 163, 184, 0.06)' : 'none',
-                  borderRight: idx % 2 === 0 ? '1px solid rgba(148, 163, 184, 0.06)' : 'none',
+                  borderBottom: idx < result.extractedFacts.length - 2 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none',
+                  borderRight: idx % 2 === 0 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none',
                 }}
               >
                 <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', mb: 0.25, fontSize: '0.625rem' }}>
@@ -549,21 +693,21 @@ function ClinicalFactsPanel({ result }: { result: AuditResult }) {
   );
 }
 
-function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutput: unknown;
+function AuditTrailPanel({nodes, rawAgentOutput,}: { nodes: AuditTrailStep[]; rawAgentOutput: unknown;
 }) {  
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
     // void navigator.clipboard.writeText(JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2));
-    void navigator.clipboard.writeText(JSON.stringify(rawOutput, null, 2));
+    void navigator.clipboard.writeText(JSON.stringify(rawAgentOutput, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
         <AccountTreeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
         <Typography variant="overline" color="text.secondary">
           Audit Trail
@@ -574,14 +718,14 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
             px: 1,
             py: 0.25,
             borderRadius: 1,
-            bgcolor: 'rgba(0, 230, 118, 0.08)',
-            border: '1px solid rgba(0, 230, 118, 0.2)',
+            bgcolor: 'rgba(22, 163, 74, 0.1)',
+            border: '1px solid rgba(22, 163, 74, 0.24)',
             display: 'flex',
             alignItems: 'center',
             gap: 0.5,
           }}
         >
-          <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'success.main', boxShadow: '0 0 5px #00E676' }} />
+          <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'success.main', boxShadow: '0 0 5px #16A34A' }} />
           <Typography variant="caption" sx={{ color: 'success.main', fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.08em' }}>
             ALL COMPLETE
           </Typography>
@@ -606,17 +750,17 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
                   sx={{
                     m: 0,
                     p: '5px',
-                    bgcolor: 'rgba(17, 24, 39, 0.95)',
-                    border: '1px solid rgba(0, 230, 118, 0.35)',
-                    boxShadow: '0 0 8px rgba(0, 230, 118, 0.15)',
+                    bgcolor: 'rgba(14, 9, 22, 0.95)',
+                    border: '1px solid rgba(22, 163, 74, 0.3)',
+                    boxShadow: '0 0 8px rgba(22, 163, 74, 0.16)',
                     color: 'success.main',
                   }}
                 >
-                  {ICON_MAP[node.icon] ?? <CheckIcon sx={{ fontSize: 14 }} />}
+                  {ICON_MAP[node.label] ?? <CheckIcon sx={{ fontSize: 14 }} />}
                 </TimelineDot>
                 {idx < nodes.length - 1 && (
                   <TimelineConnector
-                    sx={{ bgcolor: 'rgba(148, 163, 184, 0.1)', width: 1 }}
+                    sx={{ bgcolor: 'rgba(120, 113, 128, 0.1)', width: 1 }}
                   />
                 )}
               </TimelineSeparator>
@@ -632,7 +776,7 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
                       letterSpacing: '0.05em',
                     }}
                   >
-                    {node.action}
+                    {node.label}
                   </Typography>
                   <AuditTrailStatusChip status={node.status} />
                 </Box>
@@ -640,7 +784,7 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
                   variant="body2"
                   sx={{ color: 'text.primary', fontSize: '0.8rem', lineHeight: 1.4, mb: 0.5 }}
                 >
-                  {node.label}
+                  {node.description}
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                   <Typography
@@ -666,7 +810,7 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
         </Timeline>
       </Box>
 
-      <Divider sx={{ borderColor: 'rgba(148, 163, 184, 0.08)' }} />
+      <Divider sx={{ borderColor: 'rgba(120, 113, 128, 0.08)' }} />
 
       <Box sx={{ px: 3, py: 2 }}>
         <Box
@@ -678,9 +822,9 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
             cursor: 'pointer',
             p: 1.25,
             borderRadius: 1,
-            border: '1px solid rgba(148, 163, 184, 0.1)',
-            bgcolor: 'rgba(148, 163, 184, 0.03)',
-            '&:hover': { bgcolor: 'rgba(148, 163, 184, 0.06)', borderColor: 'rgba(148, 163, 184, 0.2)' },
+            border: '1px solid rgba(120, 113, 128, 0.1)',
+            bgcolor: 'rgba(120, 113, 128, 0.035)',
+            '&:hover': { bgcolor: 'rgba(120, 113, 128, 0.06)', borderColor: 'rgba(120, 113, 128, 0.2)' },
             transition: 'all 0.15s',
           }}
         >
@@ -689,8 +833,8 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
               px: 0.75,
               py: 0.2,
               borderRadius: 0.5,
-              bgcolor: 'rgba(79, 195, 247, 0.1)',
-              border: '1px solid rgba(79, 195, 247, 0.2)',
+              bgcolor: 'rgba(120, 113, 128, 0.1)',
+              border: '1px solid rgba(120, 113, 128, 0.2)',
               color: 'primary.main',
               fontSize: '0.6rem',
               fontWeight: 700,
@@ -733,8 +877,8 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
               sx={{
                 p: 2,
                 borderRadius: 1,
-                bgcolor: '#080C14',
-                border: '1px solid rgba(148, 163, 184, 0.1)',
+                bgcolor: (theme) => theme.palette.mode === 'dark' ? '#0B0A10' : '#F3F0F8',
+                border: '1px solid rgba(120, 113, 128, 0.1)',
                 overflow: 'auto',
                 maxHeight: 320,
                 m: 0,
@@ -742,14 +886,14 @@ function AuditTrailPanel({nodes, rawOutput,}: { nodes: AuditTrailNode[]; rawOutp
                 fontSize: '0.7rem',
                 lineHeight: 1.7,
                 color: 'text.secondary',
-                '& .json-key': { color: '#4FC3F7' },
-                '& .json-string': { color: '#A5D6A7' },
-                '& .json-number': { color: '#FFB74D' },
-                '& .json-bool': { color: '#CE93D8' },
+                '& .json-key': { color: '#A855F7' },
+                '& .json-string': { color: '#16A34A' },
+                '& .json-number': { color: '#F0ABFC' },
+                '& .json-bool': { color: '#E879F9' },
               }}
             >
               {/* {JSON.stringify(MOCK_AUDIT_RESULT.rawAgentOutput, null, 2)} */}
-              {JSON.stringify(rawOutput, null, 2)}
+              {JSON.stringify(rawAgentOutput, null, 2)}
             </Box>
           </Box>
         </Collapse>
@@ -775,8 +919,8 @@ function LoadingState({ progress }: { progress: number }) {
       sx={{
         p: 4,
         mt: 4,
-        border: '1px solid rgba(79, 195, 247, 0.15)',
-        bgcolor: 'rgba(79, 195, 247, 0.03)',
+        border: '1px solid rgba(120, 113, 128, 0.15)',
+        bgcolor: 'rgba(120, 113, 128, 0.035)',
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
@@ -792,10 +936,10 @@ function LoadingState({ progress }: { progress: number }) {
           value={progress}
           sx={{
             height: 3,
-            bgcolor: 'rgba(79, 195, 247, 0.1)',
+            bgcolor: 'rgba(120, 113, 128, 0.1)',
             '& .MuiLinearProgress-bar': {
               bgcolor: 'primary.main',
-              boxShadow: '0 0 8px rgba(79, 195, 247, 0.5)',
+              boxShadow: '0 0 8px rgba(168, 85, 247, 0.5)',
             },
           }}
         />
@@ -835,6 +979,7 @@ function LoadingState({ progress }: { progress: number }) {
 }
 
 export default function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [clinicalNote, setClinicalNote] = useState(MOCK_CLINICAL_NOTE);
   const [billingCode, setBillingCode] = useState('CPT 99285 – ED Visit, Level 5');
   const [policy, setPolicy] = useState('LCD L34559 – Emergency Medicine');
@@ -843,6 +988,8 @@ export default function App() {
   const [visibleTrailNodes, setVisibleTrailNodes] = useState<number>(0);
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const appTheme = useMemo(() => createAppTheme(themeMode), [themeMode]);
+  const isDarkMode = themeMode === 'dark';
 
   // const handleRunAudit = () => {
   //   setPhase('loading');
@@ -913,9 +1060,9 @@ export default function App() {
     const selectedPolicyDocuments = POLICY_REQUIREMENTS[policy] ?? ['Documentation must support the selected billing code.'];
 
     try{
-      const auditPromise = runAudit({
+      const auditPromise = runLiveAudit({
         clinicalNote, billingCode, 
-        policyID: policy.split(' – ')[0]?.trim() || policy,
+        policyId: policy.split(' – ')[0]?.trim() || policy,
         policyTitle: policy,
         policyRequirements: selectedPolicyDocuments,
       });
@@ -944,7 +1091,7 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={appTheme}>
       <CssBaseline />
       <GlobalStyles
         styles={`
@@ -977,7 +1124,7 @@ export default function App() {
             width: '55vw',
             height: '55vw',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(79, 195, 247, 0.06) 0%, transparent 65%)',
+            background: (theme) => `radial-gradient(circle, ${theme.palette.mode === 'dark' ? 'rgba(139, 92, 246, 0.045)' : 'rgba(109, 40, 217, 0.035)'} 0%, transparent 65%)`,
             animation: 'ctDrift1 22s ease-in-out infinite',
             pointerEvents: 'none',
             zIndex: 0,
@@ -992,7 +1139,7 @@ export default function App() {
             width: '50vw',
             height: '50vw',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(38, 198, 218, 0.05) 0%, transparent 65%)',
+            background: (theme) => `radial-gradient(circle, ${theme.palette.mode === 'dark' ? 'rgba(167, 139, 250, 0.035)' : 'rgba(124, 58, 237, 0.028)'} 0%, transparent 65%)`,
             animation: 'ctDrift2 28s ease-in-out infinite',
             pointerEvents: 'none',
             zIndex: 0,
@@ -1005,7 +1152,7 @@ export default function App() {
             position: 'fixed',
             inset: 0,
             backgroundImage:
-              'linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px)',
+              (theme) => `linear-gradient(${theme.palette.mode === 'dark' ? 'rgba(167, 160, 184, 0.035)' : 'rgba(68, 56, 85, 0.032)'} 1px, transparent 1px), linear-gradient(90deg, ${theme.palette.mode === 'dark' ? 'rgba(167, 160, 184, 0.035)' : 'rgba(68, 56, 85, 0.032)'} 1px, transparent 1px)`,
             backgroundSize: '48px 48px',
             animation: 'ctGridPulse 8s ease-in-out infinite',
             pointerEvents: 'none',
@@ -1020,7 +1167,7 @@ export default function App() {
             left: 0,
             right: 0,
             height: '120px',
-            background: 'linear-gradient(to bottom, transparent, rgba(79, 195, 247, 0.025), transparent)',
+            background: (theme) => `linear-gradient(to bottom, transparent, ${theme.palette.mode === 'dark' ? 'rgba(139, 92, 246, 0.018)' : 'rgba(109, 40, 217, 0.014)'}, transparent)`,
             animation: 'ctScan 14s linear infinite',
             pointerEvents: 'none',
             zIndex: 0,
@@ -1031,9 +1178,10 @@ export default function App() {
         <Box
           component="header"
           sx={{
-            borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
-            bgcolor: 'rgba(10, 13, 20, 0.95)',
-            backdropFilter: 'blur(8px)',
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(7, 7, 11, 0.92)' : 'rgba(255, 255, 255, 0.88)',
+            backdropFilter: 'blur(12px)',
             position: 'sticky',
             top: 0,
             zIndex: 'appBar',
@@ -1060,10 +1208,10 @@ export default function App() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 0 12px rgba(79, 195, 247, 0.4)',
+                    boxShadow: (theme) => `0 0 14px ${theme.palette.mode === 'dark' ? 'rgba(139, 92, 246, 0.32)' : 'rgba(109, 40, 217, 0.18)'}`,
                   }}
                 >
-                  <ShieldIcon sx={{ fontSize: 16, color: '#0A0D14' }} />
+                  <ShieldIcon sx={{ fontSize: 16, color: 'background.default' }} />
                 </Box>
                 <Box>
                   <Typography
@@ -1072,7 +1220,9 @@ export default function App() {
                       fontWeight: 700,
                       letterSpacing: '-0.02em',
                       lineHeight: 1,
-                      background: 'linear-gradient(135deg, #E2E8F0 0%, #94A3B8 100%)',
+                      background: (theme) => theme.palette.mode === 'dark'
+                        ? 'linear-gradient(135deg, #F4F1FA 0%, #A7A0B8 100%)'
+                        : 'linear-gradient(135deg, #171421 0%, #6D28D9 100%)',
                       WebkitBackgroundClip: 'text',
                       WebkitTextFillColor: 'transparent',
                     }}
@@ -1099,21 +1249,47 @@ export default function App() {
                 AI-Powered Claim Auditing for Healthcare Payment Integrity
               </Typography>
 
-              {/* POC chip */}
-              <Chip
-                label="POC · Synthetic Data Only"
-                size="small"
-                sx={{
-                  bgcolor: 'rgba(255, 179, 0, 0.08)',
-                  color: 'warning.main',
-                  border: '1px solid rgba(255, 179, 0, 0.2)',
-                  fontFamily: 'monospace',
-                  fontSize: '0.625rem',
-                  letterSpacing: '0.06em',
-                  height: 22,
-                  flexShrink: 0,
-                }}
-              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+                <Chip
+                  label="POC - Synthetic Data Only"
+                  size="small"
+                  sx={{
+                    bgcolor: 'rgba(217, 119, 6, 0.1)',
+                    color: 'warning.main',
+                    border: '1px solid rgba(217, 119, 6, 0.22)',
+                    fontFamily: 'monospace',
+                    fontSize: '0.625rem',
+                    letterSpacing: '0.06em',
+                    height: 22,
+                    flexShrink: 0,
+                  }}
+                />
+                <Tooltip title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+                  <IconButton
+                    aria-label="Toggle color mode"
+                    size="small"
+                    onClick={() => setThemeMode(isDarkMode ? 'light' : 'dark')}
+                    sx={{
+                      width: 32,
+                      height: 32,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      color: 'text.secondary',
+                      bgcolor: 'background.paper',
+                      boxShadow: (theme) => theme.palette.mode === 'dark'
+                        ? '0 0 18px rgba(139, 92, 246, 0.08)'
+                        : '0 10px 24px rgba(42, 32, 64, 0.08)',
+                      '&:hover': {
+                        color: 'primary.main',
+                        borderColor: 'primary.main',
+                        bgcolor: 'action.hover',
+                      },
+                    }}
+                  >
+                    {isDarkMode ? <LightModeIcon sx={{ fontSize: 16 }} /> : <DarkModeIcon sx={{ fontSize: 16 }} />}
+                  </IconButton>
+                </Tooltip>
+              </Box>
             </Box>
           </Container>
         </Box>
@@ -1124,7 +1300,7 @@ export default function App() {
             {/* Column 1: Clinical Note */}
             <Grid size={{ xs: 12, md: 5 }}>
               <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'primary.main' }} />
                   <Typography variant="overline" color="text.secondary">
                     Clinical Note
@@ -1132,7 +1308,7 @@ export default function App() {
                   <Chip
                     label="Plain-text / EHR export"
                     size="small"
-                    sx={{ ml: 'auto', height: 18, fontSize: '0.625rem', bgcolor: 'transparent', border: '1px solid rgba(148, 163, 184, 0.15)', color: 'text.disabled' }}
+                    sx={{ ml: 'auto', height: 18, fontSize: '0.625rem', bgcolor: 'transparent', border: '1px solid rgba(120, 113, 128, 0.15)', color: 'text.disabled' }}
                   />
                 </Box>
                 <Box sx={{ p: 2, flex: 1 }}>
@@ -1148,8 +1324,8 @@ export default function App() {
                         fontFamily: 'monospace',
                         fontSize: '0.8125rem',
                         lineHeight: 1.7,
-                        bgcolor: 'rgba(8, 12, 20, 0.5)',
-                        border: '1px solid rgba(148, 163, 184, 0.1)',
+                        bgcolor: 'background.default',
+                        border: '1px solid rgba(120, 113, 128, 0.1)',
                         borderRadius: 1,
                         color: 'text.secondary',
                         p: 1.5,
@@ -1162,7 +1338,7 @@ export default function App() {
                   sx={{
                     px: 3,
                     py: 1.25,
-                    borderTop: '1px solid rgba(148, 163, 184, 0.06)',
+                    borderTop: '1px solid rgba(120, 113, 128, 0.06)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 1,
@@ -1177,8 +1353,8 @@ export default function App() {
                       px: 1,
                       py: 0.25,
                       borderRadius: 0.5,
-                      bgcolor: 'rgba(0, 230, 118, 0.06)',
-                      border: '1px solid rgba(0, 230, 118, 0.15)',
+                      bgcolor: 'rgba(22, 163, 74, 0.06)',
+                      border: '1px solid rgba(22, 163, 74, 0.16)',
                       color: 'success.main',
                       fontSize: '0.625rem',
                       fontWeight: 700,
@@ -1195,7 +1371,7 @@ export default function App() {
             {/* Column 2: Billing Code + Policy */}
             <Grid size={{ xs: 12, md: 3 }}>
               <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'secondary.main' }} />
                   <Typography variant="overline" color="text.secondary">
                     Billing &amp; Policy
@@ -1212,7 +1388,7 @@ export default function App() {
                         fontFamily: 'monospace',
                         fontSize: '0.8125rem',
                         color: 'text.primary',
-                        bgcolor: 'rgba(8, 12, 20, 0.4)',
+                        bgcolor: 'background.default',
                       }}
                     >
                       {BILLING_CODES.map((code) => (
@@ -1233,7 +1409,7 @@ export default function App() {
                         fontFamily: 'monospace',
                         fontSize: '0.8125rem',
                         color: 'text.primary',
-                        bgcolor: 'rgba(8, 12, 20, 0.4)',
+                        bgcolor: 'background.default',
                       }}
                     >
                       {POLICIES.map((p) => (
@@ -1244,7 +1420,7 @@ export default function App() {
                     </Select>
                   </FormControl>
 
-                  <Divider sx={{ borderColor: 'rgba(148, 163, 184, 0.08)' }} />
+                  <Divider sx={{ borderColor: 'rgba(120, 113, 128, 0.08)' }} />
 
                   <Box>
                     <Typography variant="caption" color="text.disabled" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', mb: 1 }}>
@@ -1255,7 +1431,7 @@ export default function App() {
                       { label: 'Policy Engine', value: 'LCD-eval-1.0' },
                       { label: 'Scoring Method', value: 'Weighted MDM' },
                     ].map(({ label, value }) => (
-                      <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.75, borderBottom: '1px solid rgba(148, 163, 184, 0.05)' }}>
+                      <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.75, borderBottom: '1px solid rgba(120, 113, 128, 0.055)' }}>
                         <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem' }}>
                           {label}
                         </Typography>
@@ -1271,8 +1447,8 @@ export default function App() {
                       sx={{
                         p: 2,
                         borderRadius: 1,
-                        bgcolor: 'rgba(79, 195, 247, 0.04)',
-                        border: '1px solid rgba(79, 195, 247, 0.1)',
+                        bgcolor: 'rgba(120, 113, 128, 0.045)',
+                        border: '1px solid rgba(120, 113, 128, 0.1)',
                       }}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
@@ -1293,7 +1469,7 @@ export default function App() {
             {/* Column 3: How It Works + CTA */}
             <Grid size={{ xs: 12, md: 4 }}>
               <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(148, 163, 184, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#CE93D8' }} />
                   <Typography variant="overline" color="text.secondary">
                     How It Works
@@ -1333,8 +1509,8 @@ export default function App() {
                           width: 28,
                           height: 28,
                           borderRadius: '50%',
-                          bgcolor: 'rgba(148, 163, 184, 0.06)',
-                          border: '1px solid rgba(148, 163, 184, 0.12)',
+                          bgcolor: 'rgba(120, 113, 128, 0.06)',
+                          border: '1px solid rgba(120, 113, 128, 0.12)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -1361,7 +1537,7 @@ export default function App() {
                   ))}
                 </Box>
 
-                <Box sx={{ p: 3, pt: 2, borderTop: '1px solid rgba(148, 163, 184, 0.08)' }}>
+                <Box sx={{ p: 3, pt: 2, borderTop: '1px solid rgba(120, 113, 128, 0.08)' }}>
                   <Button
                     fullWidth
                     variant="contained"
@@ -1376,15 +1552,15 @@ export default function App() {
                       letterSpacing: '0.06em',
                       textTransform: 'uppercase',
                       bgcolor: 'primary.main',
-                      color: '#0A0D14',
-                      boxShadow: '0 0 20px rgba(79, 195, 247, 0.25)',
+                      color: 'background.default',
+                      boxShadow: '0 0 20px rgba(168, 85, 247, 0.25)',
                       '&:hover': {
                         bgcolor: 'primary.light',
-                        boxShadow: '0 0 28px rgba(79, 195, 247, 0.4)',
+                        boxShadow: '0 0 28px rgba(168, 85, 247, 0.4)',
                       },
                       '&:disabled': {
-                        bgcolor: 'rgba(79, 195, 247, 0.15)',
-                        color: 'rgba(79, 195, 247, 0.4)',
+                        bgcolor: 'rgba(120, 113, 128, 0.15)',
+                        color: 'rgba(168, 85, 247, 0.4)',
                       },
                     }}
                   >
@@ -1408,14 +1584,14 @@ export default function App() {
           {phase === 'results' && auditResult && (
             <Box ref={resultsRef} sx={{ mt: 4 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-                <Box sx={{ height: 1, flex: 1, bgcolor: 'rgba(148, 163, 184, 0.08)' }} />
+                <Box sx={{ height: 1, flex: 1, bgcolor: 'rgba(120, 113, 128, 0.08)' }} />
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'success.main', boxShadow: '0 0 6px #00E676' }} />
+                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'success.main', boxShadow: '0 0 6px #16A34A' }} />
                   <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: '0.12em' }}>
                     Audit Results
                   </Typography>
                 </Box>
-                <Box sx={{ height: 1, flex: 1, bgcolor: 'rgba(148, 163, 184, 0.08)' }} />
+                <Box sx={{ height: 1, flex: 1, bgcolor: 'rgba(120, 113, 128, 0.08)' }} />
               </Box>
 
               <Grid container spacing={3}>
@@ -1433,7 +1609,7 @@ export default function App() {
                 <Grid size={{ xs: 12, lg: 4 }}>
                   <AuditTrailPanel
                     nodes={auditResult.auditTrail.slice(0, visibleTrailNodes)}
-                    rawOutput={auditResult.rawAgentOutput}
+                    rawAgentOutput={auditResult.rawAgentOutput}
                   />                
                 </Grid>
               </Grid>
@@ -1447,8 +1623,8 @@ export default function App() {
           sx={{
             mt: 8,
             py: 3,
-            borderTop: '1px solid rgba(148, 163, 184, 0.08)',
-            bgcolor: 'rgba(10, 13, 20, 0.8)',
+            borderTop: '1px solid rgba(120, 113, 128, 0.08)',
+            bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(7, 7, 11, 0.82)' : 'rgba(255, 255, 255, 0.72)',
           }}
         >
           <Container maxWidth="xl">
@@ -1471,7 +1647,7 @@ export default function App() {
                     fontSize: '0.6rem',
                     fontFamily: 'monospace',
                     bgcolor: 'transparent',
-                    border: '1px solid rgba(148, 163, 184, 0.12)',
+                    border: '1px solid rgba(120, 113, 128, 0.12)',
                     color: 'text.disabled',
                   }}
                 />
@@ -1484,3 +1660,6 @@ export default function App() {
     </ThemeProvider>
   );
 }
+
+
+
