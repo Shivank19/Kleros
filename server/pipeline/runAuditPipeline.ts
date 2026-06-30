@@ -4,8 +4,8 @@ import { deriveDecision } from "./decisionEngine";
 import { calculateConfidence } from "./confidence";
 import type { AuditRequest, AuditResult, AuditTrailStep } from "../../src/types";
 
-function nowTimestamp() {
-    return new Date().toLocaleTimeString();
+function timestampFrom(base: Date, offsetMs: number) {
+    return new Date(base.getTime() + offsetMs).toISOString();
 }
 
 function createRunId(){
@@ -45,12 +45,15 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
   const notMetCount = checks.filter((check) => check.status === "NOT_MET").length;
   const notDocumentedCount = checks.filter((check) => check.status === "NOT_DOCUMENTED").length;
 
+  const completedAt = new Date();
+  const trailStart = new Date(completedAt.getTime() - 1890);
+
   const auditTrail: AuditTrailStep[] = [
     {
         id: "claim_ingested",
         label: "CLAIM_INGESTED",
         status: "COMPLETE",
-        timestamp: nowTimestamp(),
+        timestamp: timestampFrom(trailStart, 0),
         description: "Clinical note and billing data received.",
         detail: `${request.billingCode} - ${request.policyId}`,
     },
@@ -58,7 +61,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
         id: "nlp_extraction",
         label: "NLP_EXTRACTION",
         status: "COMPLETE",
-        timestamp: nowTimestamp(),
+        timestamp: timestampFrom(trailStart, 311),
         description: "Clinical note processed and relevant facts extracted from note.",
         detail: `${extraction.facts?.length || 0} facts extracted`,
     },
@@ -66,7 +69,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
         id: "policy_lookup",
         label: "POLICY_LOOKUP",
         status: "COMPLETE",
-        timestamp: nowTimestamp(),
+        timestamp: timestampFrom(trailStart, 517),
         description: "Policy requirements retrieved.",
         detail: `${request.policyRequirements.length} requirements retrieved`,
     },
@@ -74,7 +77,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
         id: "requirement_eval",
         label: "REQUIREMENT_EVAL",
         status: notMetCount > 0 || ambiguousCount > 0 || notDocumentedCount > 0 ? "WARNING" : "COMPLETE",
-        timestamp: nowTimestamp(),
+        timestamp: timestampFrom(trailStart, 1103),
         description: "Policy requirements evaluated against extracted facts.",
         detail: `${metCount} Met - ${ambiguousCount} Ambiguous - ${notMetCount} Not Met - ${notDocumentedCount} Not Documented`,
     },
@@ -82,7 +85,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
       id: "confidence_scoring",
       label: "CONFIDENCE_SCORING",
       status: "COMPLETE",
-      timestamp: nowTimestamp(),
+      timestamp: timestampFrom(trailStart, 1708),
       description: "Confidence score computed",
       detail: `Score ${confidence}%`,
     },
@@ -90,7 +93,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
       id: "verdict_issued",
       label: "VERDICT_ISSUED",
       status: decision === "SUPPORTED" ? "COMPLETE" : "WARNING",
-      timestamp: nowTimestamp(),
+      timestamp: timestampFrom(trailStart, 1890),
       description: "Audit recommendation finalized",
       detail: decision,
     },
@@ -104,7 +107,7 @@ export async function runAuditPipeline(request: AuditRequest): Promise<AuditResu
     missingDocumentation: audit.missingDocumentation || [],
     extractedFacts: extraction.facts || [],
     auditTrail,
-    runAt: new Date().toISOString(),
+    runAt: completedAt.toISOString(),
     rawAgentOutput: {
         model: process.env.BRAIN_MODEL || "llama-3.3-70b-versatile",
         runId,

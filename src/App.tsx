@@ -51,12 +51,15 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import ArticleIcon from '@mui/icons-material/Article';
+import DescriptionIcon from '@mui/icons-material/Description';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 
 import { createAppTheme, type ThemeMode } from './theme';
-import { MOCK_CLINICAL_NOTE, MOCK_AUDIT_RESULT } from './mockData';
+import { MOCK_CLINICAL_NOTE } from './mockData';
 import type { AuditResult, RequirementStatus, MissingDocumentation, AuditTrailStep } from './types';
 
-import { runLiveAudit } from './services/auditService';
+import { createTimedMockAuditResult, runLiveAudit } from './services/auditService';
 
 const BILLING_CODES = [
   'CPT 99281 – ED Visit, Level 1',
@@ -66,6 +69,8 @@ const BILLING_CODES = [
   'CPT 99285 – ED Visit, Level 5',
   'CPT 99291 – Critical Care, first 30–74 min',
   'CPT 99232 – Subsequent Hospital Care',
+  'NCD 20.5 – Respiratory Assist Devices',
+  'LCD L34806 – Pulmonary Rehabilitation',
   'ICD-10 J44.1 – COPD Acute Exacerbation',
 ];
 
@@ -108,6 +113,53 @@ const POLICY_REQUIREMENTS: Record<string, string[]> = {
   ],
 };
 
+type AppPage = 'audit' | 'samples' | 'about';
+
+const SAMPLE_NOTES = [
+  {
+    id: 'ed-copd',
+    title: 'ED COPD Exacerbation',
+    code: 'CPT 99285 – ED Visit, Level 5',
+    policy: 'LCD L34559 – Emergency Medicine',
+    note: MOCK_CLINICAL_NOTE,
+  },
+  {
+    id: 'critical-care-missing-time',
+    title: 'Critical Care - Missing Time',
+    code: 'CPT 99291 – Critical Care, first 30–74 min',
+    policy: 'LCD L33822 – Critical Care Services',
+    note: `Patient is a 72-year-old female brought to the ED in severe respiratory distress with oxygen saturation of 78% on room air, altered mentation, and accessory muscle use. Physician remained at bedside directing airway support, noninvasive ventilation, IV steroids, continuous bronchodilator therapy, magnesium, serial reassessments, and ICU consultation. ABG showed pH 7.21 and PaCO2 71. Chest imaging was reviewed and showed hyperinflation without focal infiltrate. Patient improved on BiPAP and was admitted to ICU for ongoing management. Total critical care time is not documented.`,
+  },
+  {
+    id: 'moderate-ed-supported',
+    title: 'Moderate ED Visit',
+    code: 'CPT 99284 – ED Visit, Level 4',
+    policy: 'CMS IOM Ch.12 §30.6.12',
+    note: `Patient is a 45-year-old male presenting with right flank pain, nausea, and hematuria for one day. Vitals stable. Exam notable for right CVA tenderness without peritoneal signs. Urinalysis showed blood without infection. CT abdomen/pelvis demonstrated a 4 mm distal ureteral stone without hydronephrosis. Physician reviewed imaging report, ordered IV ketorolac and ondansetron, and discharged patient with tamsulosin, oral analgesics, hydration instructions, and urology follow-up. Return precautions were reviewed.`,
+  },
+  {
+    id: 'minimal-bandage-99285',
+    title: 'Minimal Bandage vs ED Level 5',
+    code: 'CPT 99285 – ED Visit, Level 5',
+    policy: 'LCD L34559 – Emergency Medicine',
+    note: `Patient came in with a small cut on the left index finger. Wound was cleaned and bandaged. No severe symptoms documented. No diagnostic testing ordered. Patient left in stable condition.`,
+  },
+  {
+    id: 'respiratory-assist-missing-objective',
+    title: 'Respiratory Assist - Missing Objective Findings',
+    code: 'NCD 20.5 – Respiratory Assist Devices',
+    policy: 'NCD 20.5 – Respiratory Assist Devices',
+    note: `Patient has chronic shortness of breath and reports difficulty sleeping. Provider discussed possible respiratory assist device use. The note mentions COPD history but does not include oxygen saturation, arterial blood gas results, pulmonary function testing, or sleep study findings.`,
+  },
+  {
+    id: 'pulmonary-rehab-missing-plan',
+    title: 'Pulmonary Rehab - Missing Treatment Plan',
+    code: 'LCD L34806 – Pulmonary Rehabilitation',
+    policy: 'LCD L34806 – Pulmonary Rehabilitation',
+    note: `Patient has COPD and reports reduced exercise tolerance. Provider discussed pulmonary rehabilitation as a possible option. The note does not include a structured rehabilitation plan, session frequency, goals, or documented functional baseline.`,
+  },
+];
+
 const ICON_MAP: Record<string, React.ReactElement> = {
   CLAIM_INGESTED: <UploadIcon sx={{ fontSize: 14 }} />,
   NLP_EXTRACTION: <PsychologyIcon sx={{ fontSize: 14 }} />,
@@ -117,6 +169,26 @@ const ICON_MAP: Record<string, React.ReactElement> = {
   CONFIDENCE_SCORING: <VerifiedIcon sx={{ fontSize: 14 }} />,
   VERDICT_ISSUED: <GavelIcon sx={{ fontSize: 14 }} />,
 };
+
+function formatAuditClockTime(value: string, options: { milliseconds?: boolean } = {}) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const time = date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  if (!options.milliseconds) {
+    return time;
+  }
+
+  return `${time}.${date.getMilliseconds().toString().padStart(3, '0')}`;
+}
 
 function RequirementStatusChip({ status }: { status: RequirementStatus }) {
   const config: Record<
@@ -307,8 +379,11 @@ function VerdictCard({ result }: { result: AuditResult }) {
       sx={{
         p: 3,
         border: `1px solid ${vc.border}`,
-        bgcolor: vc.bg,
-        background: `linear-gradient(135deg, ${vc.bg} 0%, rgba(14, 9, 22, 0.95) 100%)`,
+        bgcolor: 'background.paper',
+        background: (theme) =>
+          theme.palette.mode === 'dark'
+            ? `linear-gradient(135deg, ${vc.bg} 0%, rgba(14, 9, 22, 0.95) 100%)`
+            : `linear-gradient(135deg, ${vc.bg} 0%, ${theme.palette.background.paper} 68%, rgba(248, 247, 251, 0.92) 100%)`,
       }}
     >
       <Box
@@ -460,7 +535,7 @@ function VerdictCard({ result }: { result: AuditResult }) {
           { label: 'Policy Reference', value: result.policyReference },
           {
             label: 'Audit Time',
-            value: new Date(result.runAt).toLocaleTimeString(),
+            value: formatAuditClockTime(result.runAt),
           },
         ].map(({ label, value }) => (
           <Box key={label}>
@@ -795,7 +870,7 @@ function AuditTrailPanel({nodes, rawAgentOutput,}: { nodes: AuditTrailStep[]; ra
                       fontSize: '0.6875rem',
                     }}
                   >
-                    {node.timestamp}
+                    {formatAuditClockTime(node.timestamp, { milliseconds: true })}
                   </Typography>
                   <Typography
                     variant="caption"
@@ -978,8 +1053,182 @@ function LoadingState({ progress }: { progress: number }) {
   );
 }
 
+function SampleNotesPage({
+  onLoadNote,
+}: {
+  onLoadNote: (sample: (typeof SAMPLE_NOTES)[number]) => void;
+}) {
+  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+
+  const handleCopy = (sample: (typeof SAMPLE_NOTES)[number]) => {
+    void navigator.clipboard.writeText(sample.note);
+    setCopiedNoteId(sample.id);
+    setTimeout(() => setCopiedNoteId(null), 1800);
+  };
+
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="overline" color="text.secondary">
+          Sample Notes
+        </Typography>
+        <Typography variant="h5" sx={{ color: 'text.primary', mt: 0.5 }}>
+          Synthetic clinical notes for audit testing
+        </Typography>
+      </Box>
+
+      <Grid container spacing={3}>
+        {SAMPLE_NOTES.map((sample) => (
+          <Grid key={sample.id} size={{ xs: 12, lg: 4 }}>
+            <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <DescriptionIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                  <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
+                    {sample.title}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  <Chip label={sample.code} size="small" sx={{ height: 20, fontFamily: 'monospace', fontSize: '0.625rem' }} />
+                  <Chip label={sample.policy} size="small" sx={{ height: 20, fontFamily: 'monospace', fontSize: '0.625rem' }} />
+                </Box>
+              </Box>
+
+              <Box
+                component="pre"
+                sx={{
+                  m: 0,
+                  p: 3,
+                  flex: 1,
+                  minHeight: 280,
+                  maxHeight: 360,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'monospace',
+                  fontSize: '0.78rem',
+                  lineHeight: 1.65,
+                  color: 'text.secondary',
+                  bgcolor: (theme) => theme.palette.mode === 'dark' ? '#0B0A10' : '#F3F0F8',
+                  borderBottom: '1px solid rgba(120, 113, 128, 0.08)',
+                }}
+              >
+                {sample.note}
+              </Box>
+
+              <Box sx={{ p: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                <Tooltip title={copiedNoteId === sample.id ? 'Copied!' : 'Copy note'}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={copiedNoteId === sample.id ? <CheckIcon /> : <ContentCopyIcon />}
+                    onClick={() => handleCopy(sample)}
+                  >
+                    {copiedNoteId === sample.id ? 'Copied' : 'Copy'}
+                  </Button>
+                </Tooltip>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<ArticleIcon />}
+                  onClick={() => onLoadNote(sample)}
+                >
+                  Load in audit
+                </Button>
+              </Box>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+    </Container>
+  );
+}
+
+function AboutPage() {
+  const capabilities = [
+    'Compares a clinical note against billing-code and policy requirements.',
+    'Surfaces met, ambiguous, missing, and unsupported documentation elements.',
+    'Produces an audit trail and raw agent output for reviewer traceability.',
+  ];
+
+  const guardrails = [
+    'Synthetic-data proof of concept.',
+    'AI-generated recommendation only.',
+    'Human review remains the source of final payment integrity judgment.',
+  ];
+
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, md: 7 }}>
+          <Paper sx={{ p: 4, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 2 }}>
+              <ShieldIcon sx={{ color: 'primary.main' }} />
+              <Typography variant="overline" color="text.secondary">
+                About Kleros
+              </Typography>
+            </Box>
+            <Typography variant="h4" sx={{ color: 'text.primary', mb: 2 }}>
+              Claim auditing support for payment integrity review
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.8, maxWidth: 760 }}>
+              Kleros is an AI-assisted claim auditing proof of concept for reviewing whether clinical
+              documentation supports a selected billing code and payer policy. It is designed to make
+              requirement checks, missing documentation, confidence scoring, and audit evidence easier
+              to inspect in one workspace.
+            </Typography>
+          </Paper>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 5 }}>
+          <Paper sx={{ p: 0, overflow: 'hidden', height: '100%' }}>
+            <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', gap: 1, alignItems: 'center' }}>
+              <FactCheckIcon sx={{ fontSize: 16, color: 'success.main' }} />
+              <Typography variant="overline" color="text.secondary">
+                What It Does
+              </Typography>
+            </Box>
+            {capabilities.map((item, idx) => (
+              <Box key={item} sx={{ px: 3, py: 2, borderBottom: idx < capabilities.length - 1 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none' }}>
+                <Typography variant="body2" sx={{ color: 'text.primary', lineHeight: 1.6 }}>
+                  {item}
+                </Typography>
+              </Box>
+            ))}
+          </Paper>
+        </Grid>
+
+        <Grid size={{ xs: 12 }}>
+          <Paper sx={{ p: 0, overflow: 'hidden' }}>
+            <Box sx={{ px: 3, py: 2, borderBottom: '1px solid rgba(120, 113, 128, 0.08)', display: 'flex', gap: 1, alignItems: 'center' }}>
+              <WarningAmberIcon sx={{ fontSize: 16, color: 'warning.main' }} />
+              <Typography variant="overline" color="text.secondary">
+                Review Guardrails
+              </Typography>
+            </Box>
+            <Grid container>
+              {guardrails.map((item, idx) => (
+                <Grid key={item} size={{ xs: 12, md: 4 }}>
+                  <Box sx={{ px: 3, py: 2.5, borderRight: { md: idx < guardrails.length - 1 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none' }, borderBottom: { xs: idx < guardrails.length - 1 ? '1px solid rgba(120, 113, 128, 0.06)' : 'none', md: 'none' } }}>
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'text.disabled', display: 'block', mb: 0.5 }}>
+                      0{idx + 1}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.65 }}>
+                      {item}
+                    </Typography>
+                  </Box>
+                </Grid>
+              ))}
+            </Grid>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Container>
+  );
+}
+
 export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const [activePage, setActivePage] = useState<AppPage>('audit');
   const [clinicalNote, setClinicalNote] = useState(MOCK_CLINICAL_NOTE);
   const [billingCode, setBillingCode] = useState('CPT 99285 – ED Visit, Level 5');
   const [policy, setPolicy] = useState('LCD L34559 – Emergency Medicine');
@@ -990,6 +1239,11 @@ export default function App() {
   const resultsRef = useRef<HTMLDivElement>(null);
   const appTheme = useMemo(() => createAppTheme(themeMode), [themeMode]);
   const isDarkMode = themeMode === 'dark';
+  const navItems: { id: AppPage; label: string }[] = [
+    { id: 'audit', label: 'Audit' },
+    { id: 'samples', label: 'Sample Notes' },
+    { id: 'about', label: 'About' },
+  ];
 
   // const handleRunAudit = () => {
   //   setPhase('loading');
@@ -1079,16 +1333,27 @@ export default function App() {
     } catch (error) {
         console.error('Error running audit:', error);
         // Fallback for demo
-        setAuditResult(MOCK_AUDIT_RESULT);
+        const fallbackResult = createTimedMockAuditResult();
+        setAuditResult(fallbackResult);
         setPhase('results');
       
-        revealTrialNodes(MOCK_AUDIT_RESULT);
+        revealTrialNodes(fallbackResult);
 
         setTimeout(() => {
           resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 200);
     }
   }
+
+  const handleLoadSampleNote = (sample: (typeof SAMPLE_NOTES)[number]) => {
+    setClinicalNote(sample.note);
+    setBillingCode(sample.code);
+    setPolicy(sample.policy);
+    setActivePage('audit');
+    setPhase('input');
+    setAuditResult(null);
+    setVisibleTrailNodes(0);
+  };
 
   return (
     <ThemeProvider theme={appTheme}>
@@ -1235,6 +1500,46 @@ export default function App() {
                 </Box>
               </Box>
 
+              <Box
+                component="nav"
+                aria-label="Primary navigation"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  p: 0.4,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(17, 16, 24, 0.78)' : 'rgba(248, 247, 251, 0.88)',
+                }}
+              >
+                {navItems.map((item) => {
+                  const isActive = activePage === item.id;
+                  return (
+                    <Button
+                      key={item.id}
+                      size="small"
+                      variant={isActive ? 'contained' : 'text'}
+                      onClick={() => setActivePage(item.id)}
+                      sx={{
+                        minHeight: 28,
+                        px: { xs: 1, sm: 1.5 },
+                        fontSize: '0.72rem',
+                        color: isActive ? '#FFFFFF' : 'text.secondary',
+                        bgcolor: isActive ? 'primary.main' : 'transparent',
+                        '&:hover': {
+                          bgcolor: isActive ? 'primary.dark' : 'rgba(120, 113, 128, 0.08)',
+                          color: isActive ? '#FFFFFF' : 'text.primary',
+                        },
+                      }}
+                    >
+                      {item.label}
+                    </Button>
+                  );
+                })}
+              </Box>
+
               {/* Tagline */}
               <Typography
                 variant="caption"
@@ -1294,6 +1599,7 @@ export default function App() {
           </Container>
         </Box>
 
+        {activePage === 'audit' ? (
         <Container maxWidth="xl" sx={{ py: 4 }}>
           {/* Phase 1 – Input */}
           <Grid container spacing={3}>
@@ -1616,6 +1922,11 @@ export default function App() {
             </Box>
           )}
         </Container>
+        ) : activePage === 'samples' ? (
+          <SampleNotesPage onLoadNote={handleLoadSampleNote} />
+        ) : (
+          <AboutPage />
+        )}
 
         {/* Footer */}
         <Box
