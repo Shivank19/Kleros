@@ -1227,7 +1227,7 @@ export default function App() {
                       WebkitTextFillColor: 'transparent',
                     }}
                   >
-                    ClaimTrust
+                    Kleros
                   </Typography>
                   <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.6rem', letterSpacing: '0.08em', display: 'block', lineHeight: 1 }}>
                     CLAIM AUDIT
@@ -1632,7 +1632,7 @@ export default function App() {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <ShieldIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
                 <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.7rem' }}>
-                  ClaimTrust — AI-Powered Claim Auditing Assistant
+                  Kleros - AI-Powered Claim Auditing Assistant
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
