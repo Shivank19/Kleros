@@ -82,7 +82,8 @@ This keeps the final recommendation explainable and consistent.
 ### Backend
 
 - Node.js
-- Express
+- Express for local development
+- Vercel Functions for production API routes
 - TypeScript
 - Llama3.3-70B / Qwen3-32B
 
@@ -113,6 +114,8 @@ BRAIN_API_KEY={your_groq_api_key_here}
 BRAIN_MODEL=llama-3.3-70b-versatile
 BRAIN_BASE_URL=https://api.groq.com/openai/v1
 ```
+
+For Vercel, omit `VITE_API_BASE_URL` or leave it empty. The deployed frontend calls same-origin API routes such as `/api/audit`.
 
 ---
 
@@ -160,6 +163,43 @@ Expected response:
   "baseUrl": "https://api.groq.com/openai/v1",
   "hasBrainKey": true
 }
+```
+
+---
+
+## Deploying To Vercel
+
+Kleros is prepared for a single Vercel deployment:
+
+- Vite builds the React frontend into `dist`.
+- `api/health.ts` exposes `GET /api/health`.
+- `api/audit.ts` exposes `POST /api/audit`.
+- The existing `server/pipeline/*` files are reused by the Vercel API route.
+- `server/index.ts` remains available for local Express development.
+
+Vercel project settings:
+
+```text
+Framework Preset: Vite
+Build Command: npm run build
+Output Directory: dist
+```
+
+Add these environment variables in Vercel:
+
+```env
+BRAIN_API_KEY=your_groq_api_key_here
+BRAIN_MODEL=llama-3.3-70b-versatile
+BRAIN_BASE_URL=https://api.groq.com/openai/v1
+VITE_USE_MOCK_AUDIT=false
+```
+
+Do not set `VITE_API_BASE_URL` on Vercel unless the API is deployed separately. Leaving it empty makes the frontend call the Vercel functions on the same domain.
+
+After deployment, verify:
+
+```text
+https://your-app.vercel.app/api/health
 ```
 
 ---

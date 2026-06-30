@@ -2,7 +2,8 @@ import type { AuditRequest, AuditResult } from "../types";
 import { MOCK_AUDIT_RESULT } from "../mockData";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:3001" : "");
 
 const USE_MOCK_AUDIT = import.meta.env.VITE_USE_MOCK_AUDIT === "true";
 
